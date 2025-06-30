@@ -24,7 +24,7 @@ class PhishingEmailDetectorApp:
         self.root.configure(bg="#525252")
         self.root.resizable(False, False)
         
-        # Set window icon (replace with your actual icon path)
+        # Set window icon 
         try:
             self.root.iconbitmap("favicon (1).ico")
         except:
@@ -84,7 +84,7 @@ class PhishingEmailDetectorApp:
         self.running = False
         self.checked_uids = set()
         self.highest_uid = 0
-        self.google_safe_browsing_api_key = "AIzaSyCgx2iyBf9rnTwZlNVTQ55yxC0tAwTtQvA"  # Placeholder for API key
+        self.google_safe_browsing_api_key = "PUT YOUR SAFE BROWSING KEY"  # Placeholder for API key
 
     def create_header(self):
         """Create the modern header section with logo and title"""
