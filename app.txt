@@ -1,0 +1,394 @@
+import tkinter as tk
+from tkinter import messagebox
+from tkinter import ttk
+import imaplib
+import email
+from email.header import decode_header
+import time
+import threading
+import pickle
+import numpy as np
+import os
+import sys
+from tensorflow.keras.models import load_model
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+from plyer import notification
+
+class PhishingEmailDetectorApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("DetectAlone - Email Security Monitor")
+        self.root.geometry("700x500")
+        self.root.configure(bg="#f5f7fa")
+        self.root.resizable(False, False)
+        
+        # Set window icon (replace with your actual icon path)
+        try:
+            self.root.iconbitmap("favicon (1).ico")
+        except:
+            pass
+
+        # Professional color scheme
+        self.colors = {
+            "primary": "#4a6baf",
+            "primary_dark": "#3a559f",
+            "secondary": "#6c757d",
+            "success": "#28a745",
+            "danger": "#dc3545",
+            "warning": "#ffc107",
+            "light": "#f8f9fa",
+            "dark": "#343a40",
+            "white": "#ffffff",
+            "gray": "#e9ecef"
+        }
+
+        # Fonts
+        self.fonts = {
+            "header": ("Segoe UI", 20, "bold"),
+            "subheader": ("Segoe UI", 12),
+            "label": ("Segoe UI", 10, "bold"),
+            "entry": ("Segoe UI", 10),
+            "button": ("Segoe UI", 11, "bold"),
+            "status": ("Segoe UI", 9)
+        }
+
+        # Create main container with shadow effect
+        self.main_container = tk.Frame(root, bg=self.colors["gray"], padx=1, pady=1)
+        self.main_container.pack(expand=True, fill="both", padx=20, pady=20)
+
+        # Main frame with white background
+        self.main_frame = tk.Frame(self.main_container, bg=self.colors["white"], padx=30, pady=30)
+        self.main_frame.pack(expand=True, fill="both")
+
+        # Header section
+        self.create_header()
+        
+        # Form section
+        self.create_form()
+        
+        # Status section
+        self.create_status()
+
+        # Load model and tokenizer
+        self.load_models()
+
+        # Initialize variables
+        self.imap = None
+        self.running = False
+        self.checked_uids = set()
+        self.highest_uid = 0
+
+    def create_header(self):
+        """Create the header section with logo and title"""
+        header_frame = tk.Frame(self.main_frame, bg=self.colors["white"])
+        header_frame.pack(fill="x", pady=(0, 20))
+
+        # Configure grid columns for centering
+        header_frame.columnconfigure(0, weight=1)
+        header_frame.columnconfigure(1, weight=0)
+        header_frame.columnconfigure(2, weight=1)
+
+        # Logo placeholder (you can replace with actual image)
+        self.logo = tk.Label(header_frame, text="🛡️", font=("Segoe UI", 24), 
+                           bg=self.colors["white"], fg=self.colors["primary"])
+        self.logo.grid(row=0, column=0, sticky="e", padx=(0, 15))
+
+        # Title and subtitle
+        title_frame = tk.Frame(header_frame, bg=self.colors["white"])
+        title_frame.grid(row=0, column=1, sticky="ew")
+
+        tk.Label(title_frame, text="DetectAlone", font=self.fonts["header"], 
+                bg=self.colors["white"], fg=self.colors["dark"]).pack(anchor="center")
+
+        tk.Label(title_frame, text="Email Security Monitoring System", font=self.fonts["subheader"], 
+                bg=self.colors["white"], fg=self.colors["secondary"]).pack(anchor="center")
+
+        # Empty frame to balance grid
+        empty_frame = tk.Frame(header_frame, bg=self.colors["white"])
+        empty_frame.grid(row=0, column=2)
+
+    def create_form(self):
+        """Create the form section with email and password fields"""
+        form_frame = tk.Frame(self.main_frame, bg=self.colors["white"])
+        form_frame.pack(fill="x", pady=(0, 20))
+
+        # Email field
+        email_frame = tk.Frame(form_frame, bg=self.colors["white"])
+        email_frame.pack(fill="x", pady=(0, 15))
+        
+        tk.Label(email_frame, text="Email Address", font=self.fonts["label"], 
+                bg=self.colors["white"], fg=self.colors["dark"]).pack(anchor="w")
+        
+        self.email_entry = tk.Entry(email_frame, font=self.fonts["entry"], 
+                                  bg=self.colors["light"], relief="flat", 
+                                  highlightthickness=1, highlightcolor=self.colors["primary"],
+                                  highlightbackground="#ddd", insertbackground=self.colors["primary"])
+        self.email_entry.pack(fill="x", ipady=5)
+        self.email_entry.insert(0, "your.email@example.com")
+        self.email_entry.bind("<FocusIn>", lambda e: self._clear_placeholder(e, "your.email@example.com"))
+        self.email_entry.bind("<FocusOut>", lambda e: self._add_placeholder(e, "your.email@example.com"))
+
+        # Password field
+        password_frame = tk.Frame(form_frame, bg=self.colors["white"])
+        password_frame.pack(fill="x", pady=(0, 20))
+        
+        tk.Label(password_frame, text="Password", font=self.fonts["label"], 
+                bg=self.colors["white"], fg=self.colors["dark"]).pack(anchor="w")
+        
+        self.password_entry = tk.Entry(password_frame, font=self.fonts["entry"], 
+                                      bg=self.colors["light"], relief="flat", show="*",
+                                      highlightthickness=1, highlightcolor=self.colors["primary"],
+                                      highlightbackground="#ddd", insertbackground=self.colors["primary"])
+        self.password_entry.pack(fill="x", ipady=5)
+        self.password_entry.insert(0, "password")
+        self.password_entry.bind("<FocusIn>", lambda e: self._clear_placeholder(e, "password", is_password=True))
+        self.password_entry.bind("<FocusOut>", lambda e: self._add_placeholder(e, "password", is_password=True))
+
+        # Buttons
+        button_frame = tk.Frame(form_frame, bg=self.colors["white"])
+        button_frame.pack(pady=(10, 0))
+
+        self.start_button = tk.Button(button_frame, text="START MONITORING", 
+                                    command=self.start_detection, bg=self.colors["success"], 
+                                    fg=self.colors["white"], activebackground="#1e7e34",
+                                    font=self.fonts["button"], relief="flat", padx=20, pady=8)
+        self.start_button.pack(side="left", padx=(0, 10))
+        
+        self.stop_button = tk.Button(button_frame, text="STOP MONITORING", 
+                                   command=self.stop_detection, bg=self.colors["danger"], 
+                                   fg=self.colors["white"], activebackground="#bd2130",
+                                   font=self.fonts["button"], relief="flat", padx=20, pady=8, state="disabled")
+        self.stop_button.pack(side="left")
+
+        # Add hover effects
+        self.add_button_hover_effect(self.start_button, self.colors["primary"], self.colors["primary_dark"])
+        self.add_button_hover_effect(self.stop_button, self.colors["secondary"], "#5a6268")
+
+    def create_status(self):
+        """Create the status indicator section"""
+        status_frame = tk.Frame(self.main_frame, bg=self.colors["white"])
+        status_frame.pack(fill="x", pady=(20, 0))
+
+        # Status indicator
+        self.indicator = tk.Canvas(status_frame, width=20, height=20, bg=self.colors["white"], 
+                                  highlightthickness=0, bd=0)
+        self.indicator.pack(side="left", padx=(0, 10))
+        self.indicator_oval = self.indicator.create_oval(2, 2, 18, 18, fill=self.colors["secondary"], outline="")
+
+        # Status text
+        self.status_label = tk.Label(status_frame, text="Ready to monitor your inbox", 
+                                   font=self.fonts["status"], bg=self.colors["white"], 
+                                   fg=self.colors["secondary"])
+        self.status_label.pack(side="left", fill="x", expand=True)
+
+    def add_button_hover_effect(self, button, normal_color, hover_color):
+        """Add hover effect to buttons"""
+        def on_enter(e):
+            button['background'] = hover_color
+        
+        def on_leave(e):
+            button['background'] = normal_color
+        
+        button.bind("<Enter>", on_enter)
+        button.bind("<Leave>", on_leave)
+
+    def load_models(self):
+        """Load the ML model and tokenizer"""
+        # Determine base path for model and tokenizer
+        if getattr(sys, 'frozen', False):
+            base_path = sys._MEIPASS
+        else:
+            base_path = os.path.dirname(os.path.abspath(__file__))
+
+        try:
+            # Load model and tokenizer
+            model_path = os.path.join(base_path, "my_model_phishing.h5")
+            tokenizer_path = os.path.join(base_path, "tokenizer (1).pkl")
+            self.model = load_model(model_path)
+            with open(tokenizer_path, "rb") as f:
+                self.tokenizer = pickle.load(f)
+            
+            # Update status to show models loaded
+            self.status_label.config(text="Ready to monitor your inbox (AI models loaded)")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load AI models: {str(e)}")
+            self.status_label.config(text="Error loading AI models", fg=self.colors["danger"])
+
+    def _clear_placeholder(self, event, placeholder, is_password=False):
+        """Clear placeholder text when field is focused"""
+        widget = event.widget
+        if widget.get() == placeholder:
+            widget.delete(0, tk.END)
+            if is_password:
+                widget.config(show="*")
+            widget.config(fg=self.colors["dark"])
+
+    def _add_placeholder(self, event, placeholder, is_password=False):
+        """Add placeholder text when field loses focus and is empty"""
+        widget = event.widget
+        if not widget.get():
+            widget.insert(0, placeholder)
+            if is_password:
+                widget.config(show="")
+            widget.config(fg=self.colors["secondary"])
+
+    def start_detection(self):
+        """Start the email monitoring process"""
+        email_user = self.email_entry.get().strip()
+        email_pass = self.password_entry.get().strip()
+        
+        if email_user == "your.email@example.com" or not email_user or email_pass == "password" or not email_pass:
+            messagebox.showerror("Input Error", "Please enter both email and app password.")
+            return
+
+        self.start_button.config(state="disabled")
+        self.stop_button.config(state="normal")
+        self.status_label.config(text="Connecting to Gmail server...", fg=self.colors["dark"])
+        self.indicator.itemconfig(self.indicator_oval, fill=self.colors["warning"])
+
+        # Animate the status indicator
+        self.animate_indicator()
+
+        # Start the email checking thread
+        threading.Thread(target=self.check_email_loop, args=(email_user, email_pass), daemon=True).start()
+
+    def stop_detection(self):
+        """Stop the email monitoring process"""
+        self.running = False
+        self.status_label.config(text="Monitoring stopped", fg=self.colors["secondary"])
+        self.start_button.config(state="normal")
+        self.stop_button.config(state="disabled")
+        self.indicator.itemconfig(self.indicator_oval, fill=self.colors["secondary"])
+
+    def animate_indicator(self):
+        """Animate the status indicator when monitoring"""
+        if not self.running:
+            return
+            
+        current_color = self.indicator.itemcget(self.indicator_oval, "fill")
+        new_color = self.colors["success"] if current_color == self.colors["primary"] else self.colors["primary"]
+        self.indicator.itemconfig(self.indicator_oval, fill=new_color)
+        self.root.after(1000, self.animate_indicator)
+
+    def connect_imap(self, email_user, email_pass):
+        """Connect to IMAP server"""
+        try:
+            imap = imaplib.IMAP4_SSL("imap.gmail.com")
+            imap.login(email_user, email_pass)
+            imap.select("inbox")
+            return imap
+        except Exception as e:
+            self.status_label.config(text=f"Connection failed: {e}", fg=self.colors["danger"])
+            messagebox.showerror("Connection Error", f"Failed to connect to Gmail IMAP: {e}")
+            self.start_button.config(state="normal")
+            self.stop_button.config(state="disabled")
+            self.indicator.itemconfig(self.indicator_oval, fill=self.colors["danger"])
+            return None
+
+    def check_email_loop(self, email_user, email_pass):
+        """Main loop for checking emails"""
+        self.imap = self.connect_imap(email_user, email_pass)
+        if not self.imap:
+            return
+            
+        self.running = True
+        self.status_label.config(text="Monitoring inbox for phishing emails...", fg=self.colors["dark"])
+        self.indicator.itemconfig(self.indicator_oval, fill=self.colors["primary"])
+
+        # Get highest UID at start to ignore previous emails
+        status, data = self.imap.uid('search', None, "ALL")
+        if status == "OK":
+            uids = data[0].split()
+            if uids:
+                self.highest_uid = int(uids[-1])
+            else:
+                self.highest_uid = 0
+        else:
+            self.highest_uid = 0
+
+        while self.running:
+            try:
+                self.imap.select("inbox")
+                # Search for unseen emails with UID greater than highest_uid
+                criteria = f'(UID {self.highest_uid + 1}:*)'
+                status, messages = self.imap.uid('search', None, criteria)
+                if status != "OK":
+                    self.status_label.config(text="Failed to search inbox", fg=self.colors["danger"])
+                    time.sleep(10)
+                    continue
+
+                mail_uids = messages[0].split()
+                new_mail_uids = [uid for uid in mail_uids if int(uid) > self.highest_uid]
+
+                for uid in new_mail_uids:
+                    status, msg_data = self.imap.uid('fetch', uid, "(RFC822)")
+                    if status != "OK":
+                        continue
+                    for response_part in msg_data:
+                        if isinstance(response_part, tuple):
+                            msg = email.message_from_bytes(response_part[1])
+                            email_content = self.get_email_content(msg)
+                            is_phishing = self.predict_phishing(email_content)
+                            self.show_notification(is_phishing)
+                    self.highest_uid = max(self.highest_uid, int(uid))
+
+                time.sleep(10)
+            except Exception as e:
+                import traceback
+                tb_str = traceback.format_exc()
+                self.status_label.config(text=f"Error during checking: {e}", fg=self.colors["danger"])
+                print(f"Exception in check_email_loop:\n{tb_str}")
+                time.sleep(10)
+
+    def get_email_content(self, msg):
+        """Extract email content from message"""
+        parts = []
+        if msg.is_multipart():
+            for part in msg.walk():
+                content_type = part.get_content_type()
+                content_disposition = str(part.get("Content-Disposition"))
+                if content_type == "text/plain" and "attachment" not in content_disposition:
+                    try:
+                        part_content = part.get_payload(decode=True).decode()
+                        parts.append(part_content)
+                    except:
+                        pass
+        else:
+            try:
+                parts.append(msg.get_payload(decode=True).decode())
+            except:
+                pass
+        return "\n".join(parts)
+
+    def predict_phishing(self, text):
+        """Predict if email is phishing using the ML model"""
+        sequences = self.tokenizer.texts_to_sequences([text])
+        padded = pad_sequences(sequences, maxlen=100)
+        pred = self.model.predict(padded)
+        return pred[0][0] > 0.5
+
+    def show_notification(self, is_phishing):
+        """Show desktop notification based on prediction"""
+        try:
+            if is_phishing:
+                notification.notify(
+                    title="⚠️ Phishing Email Detected",
+                    message="Warning: The received email is detected as phishing!",
+                    timeout=10
+                )
+                # Flash the indicator red briefly
+                self.indicator.itemconfig(self.indicator_oval, fill=self.colors["danger"])
+                self.root.after(2000, lambda: self.indicator.itemconfig(self.indicator_oval, fill=self.colors["primary"]))
+            else:
+                notification.notify(
+                    title="✓ Safe Email",
+                    message="The received email is safe.",
+                    timeout=5
+                )
+        except NotImplementedError:
+            print("Notification not supported on this system or environment.")
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = PhishingEmailDetectorApp(root)
+    root.mainloop()
